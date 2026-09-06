@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "nearplayer",
+  "version": "${version}",
+  "name": "VoronezhskiyAlert",
+  "description": "Client-side BedWars awareness HUD: enemy-only tracking, equipment, direction arrows, flag alerts, bell warning and red danger vignette.",
+  "authors": [
+    "nikitaberg"
+  ],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "cardejibka.nearplayer.NearplayerClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.1",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  },
+  "contact": {
+    "homepage": "https://nikitaberg.ru"
+  }
+}
