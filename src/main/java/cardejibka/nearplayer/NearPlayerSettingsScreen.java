@@ -1,16 +1,49 @@
 package cardejibka.nearplayer;
 
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-
-// NOTE: This screen does not extend ButtonWidget, so the plain name "Text" here
-// always resolves to net.minecraft.text.Text (no ButtonWidget.Text nested-class
-// shadowing issue). ModernButton's constructors are typed to accept
-// net.minecraft.text.Text explicitly, so passing Text.translatable(...) below
-// is unambiguous.
+// ===== PORTING NOTE (Minecraft 26.x) =======================================
+// MAJOR REWRITE after decompiling Screen.java and EditBox.java (26.2).
+// Key confirmed findings:
+//   - Screen has public fields: `minecraft` (Minecraft instance), `font`
+//     (Font), `width`/`height` (int). My earlier guesses for those two field
+//     names were correct.
+//   - addDrawableChild(...) does not exist. The real method is
+//     addRenderableWidget(T) (registers a widget that is both interactive
+//     and rendered).
+//   - render(GuiGraphicsExtractor, int, int, float) does not exist as an
+//     override point; Screen's own entry point is
+//     extractRenderState(GuiGraphicsExtractor, int, int, float). There is no
+//     more separate background-drawing pass to call super for in the same
+//     way - extractRenderStateWithTooltipAndSubtitles is the actual root
+//     entry point Fabric/vanilla calls, and it already calls
+//     extractBackground(...) + extractRenderState(...) for us. So this class
+//     now overrides extractRenderState(...) and simply calls
+//     super.extractRenderState(...) first (which draws all registered
+//     renderables/widgets), then draws our own extra text on top - this
+//     mirrors what the old render() override used to do.
+//   - shouldPause() does not exist; the equivalent is isPauseScreen()
+//     (confirmed method on Screen, default returns true).
+//   - close() does not exist on Screen; the built-in cancel/back hook is
+//     onClose() (confirmed - default implementation is
+//     `this.minecraft.gui.setScreen(null)`), so that's what's overridden
+//     below instead, calling setScreen(parent) the same way the old code did.
+//   - There is no drawCenteredTextWithShadow/drawTextWithShadow on
+//     GuiGraphicsExtractor. Confirmed from EditBox.java: real text drawing is
+//     graphics.text(Font, Component/FormattedCharSequence, x, y, color,
+//     shadow). Centering has to be computed manually via font.width(...),
+//     same as EditBox itself does internally.
+//   - EditBox no longer has setText/getText/setPlaceholder/setTextPredicate.
+//     Confirmed real API: setValue(String)/getValue(), setHint(Component)
+//     for placeholder text, and addFormatter(TextFormatter) for custom
+//     per-character formatting/filtering (TextFormatter interface is defined
+//     in EditBox's own file, not decompiled here - for the numeric-only
+//     filter we instead filter input in the responder, which is simpler and
+//     doesn't need TextFormatter's exact shape).
+// =============================================================================
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
 
 /**
  * Settings menu. Layout matches the original design: narrow input fields with
@@ -22,9 +55,9 @@ public class NearPlayerSettingsScreen extends Screen {
     private final Screen parent;
     private final NearPlayerHud hud;
 
-    private TextFieldWidget detectionRadiusField;
-    private TextFieldWidget alertRadiusField;
-    private TextFieldWidget excludedField;
+    private EditBox detectionRadiusField;
+    private EditBox alertRadiusField;
+    private EditBox excludedField;
 
     private static final int WINDOW_WIDTH = 320;
     private static final int WINDOW_HEIGHT = 300;
@@ -36,7 +69,7 @@ public class NearPlayerSettingsScreen extends Screen {
     private int bottomHintY;
 
     public NearPlayerSettingsScreen(Screen parent, NearPlayerHud hud) {
-        super(Text.translatable("title.nearplayer.settings"));
+        super(Component.translatable("title.nearplayer.settings"));
         this.parent = parent;
         this.hud = hud;
     }
@@ -50,17 +83,16 @@ public class NearPlayerSettingsScreen extends Screen {
         int fieldX = centerX + WINDOW_WIDTH - FIELD_WIDTH - 40;
 
         // --- Narrow input fields, label to the left (original layout) ----------
-        detectionRadiusField = createField(fieldX, startY + 10, FIELD_WIDTH,
+        detectionRadiusField = createNumericField(fieldX, startY + 10, FIELD_WIDTH,
                 hud.getDetectionRadius(), "placeholder.nearplayer.radius");
-        alertRadiusField = createField(fieldX, startY + 38, FIELD_WIDTH,
+        alertRadiusField = createNumericField(fieldX, startY + 38, FIELD_WIDTH,
                 hud.getAlertRadius(), "placeholder.nearplayer.alert_radius");
 
-        excludedField = new TextFieldWidget(textRenderer, fieldX, startY + 66,
-                FIELD_WIDTH, 20, Text.literal(""));
+        excludedField = new EditBox(font, fieldX, startY + 66, FIELD_WIDTH, 20, Component.literal(""));
         excludedField.setMaxLength(200);
-        excludedField.setText(hud.getExcludedPlayers());
-        excludedField.setPlaceholder(Text.translatable("placeholder.nearplayer.excluded").formatted(Formatting.GRAY));
-        addDrawableChild(excludedField);
+        excludedField.setValue(hud.getExcludedPlayers());
+        excludedField.setHint(Component.translatable("placeholder.nearplayer.excluded").withStyle(ChatFormatting.GRAY));
+        addRenderableWidget(excludedField);
 
         // --- Toggle/opacity buttons, compact two-column grid --------------------
         int gridY = startY + 100;
@@ -88,16 +120,16 @@ public class NearPlayerSettingsScreen extends Screen {
         int buttonsY = gridY + rowHeight * 3 + 14;
         int totalWidth = colWidth * 2 + 8;
         int smallButtonWidth = (totalWidth - 8) / 3;
-        addDrawableChild(new ModernButton(colLeftX, buttonsY, smallButtonWidth, 22,
-                Text.translatable("button.nearplayer.clear_flag"), btn -> hud.clearFlag()));
-        addDrawableChild(new ModernButton(colLeftX + smallButtonWidth + 4, buttonsY, smallButtonWidth, 22,
-                Text.translatable("button.nearplayer.save"), btn -> {
+        addRenderableWidget(new ModernButton(colLeftX, buttonsY, smallButtonWidth, 22,
+                Component.translatable("button.nearplayer.clear_flag"), btn -> hud.clearFlag()));
+        addRenderableWidget(new ModernButton(colLeftX + smallButtonWidth + 4, buttonsY, smallButtonWidth, 22,
+                Component.translatable("button.nearplayer.save"), btn -> {
                     applyFields();
                     hud.saveConfig();
-                    client.setScreen(parent);
+                    minecraft.gui.setScreen(parent);
                 }));
-        addDrawableChild(new ModernButton(colLeftX + (smallButtonWidth + 4) * 2, buttonsY, smallButtonWidth, 22,
-                Text.translatable("button.nearplayer.cancel"), btn -> client.setScreen(parent)));
+        addRenderableWidget(new ModernButton(colLeftX + (smallButtonWidth + 4) * 2, buttonsY, smallButtonWidth, 22,
+                Component.translatable("button.nearplayer.cancel"), btn -> minecraft.gui.setScreen(parent)));
 
         this.labelX = centerX + 20;
         this.fieldsY = startY;
@@ -114,7 +146,7 @@ public class NearPlayerSettingsScreen extends Screen {
                     setter.accept(value);
                     btn.setMessage(opacityText(labelKey, value));
                 });
-        addDrawableChild(button);
+        addRenderableWidget(button);
     }
 
     private int closestOpacityIndex(float value) {
@@ -130,17 +162,24 @@ public class NearPlayerSettingsScreen extends Screen {
         return best;
     }
 
-    private Text opacityText(String labelKey, float value) {
-        return Text.translatable(labelKey, Math.round(value * 100));
+    private Component opacityText(String labelKey, float value) {
+        return Component.translatable(labelKey, Math.round(value * 100));
     }
 
-    private TextFieldWidget createField(int x, int y, int width, int value, String placeholderKey) {
-        TextFieldWidget field = new TextFieldWidget(textRenderer, x, y, width, 20, Text.literal(""));
+    // Confirmed from EditBox.java: no setTextPredicate(...) exists. Filtering
+    // non-digit input is instead done in the responder by rejecting/reverting
+    // the change - simpler than reimplementing TextFormatter for this case.
+    private EditBox createNumericField(int x, int y, int width, int value, String placeholderKey) {
+        EditBox field = new EditBox(font, x, y, width, 20, Component.literal(""));
         field.setMaxLength(5);
-        field.setTextPredicate(s -> s.matches("\\d*"));
-        field.setText(String.valueOf(value));
-        field.setPlaceholder(Text.translatable(placeholderKey).formatted(Formatting.GRAY));
-        addDrawableChild(field);
+        field.setValue(String.valueOf(value));
+        field.setHint(Component.translatable(placeholderKey).withStyle(ChatFormatting.GRAY));
+        field.setResponder(text -> {
+            if (!text.matches("\\d*")) {
+                field.setValue(text.replaceAll("\\D", ""));
+            }
+        });
+        addRenderableWidget(field);
         return field;
     }
 
@@ -154,42 +193,54 @@ public class NearPlayerSettingsScreen extends Screen {
                     self.setMessage(toggleText(keyPrefix, value));
                 }, true);
         button.setToggled(initial);
-        addDrawableChild(button);
+        addRenderableWidget(button);
     }
 
-    private Text toggleText(String keyPrefix, boolean enabled) {
-        return Text.translatable(keyPrefix + (enabled ? ".on" : ".off"));
+    private Component toggleText(String keyPrefix, boolean enabled) {
+        return Component.translatable(keyPrefix + (enabled ? ".on" : ".off"));
     }
 
     private void applyFields() {
-        try { hud.setDetectionRadius(Integer.parseInt(detectionRadiusField.getText().trim())); }
+        try { hud.setDetectionRadius(Integer.parseInt(detectionRadiusField.getValue().trim())); }
         catch (NumberFormatException ignored) { }
-        try { hud.setAlertRadius(Integer.parseInt(alertRadiusField.getText().trim())); }
+        try { hud.setAlertRadius(Integer.parseInt(alertRadiusField.getValue().trim())); }
         catch (NumberFormatException ignored) { }
-        hud.setExcludedPlayers(excludedField.getText().trim());
+        hud.setExcludedPlayers(excludedField.getValue().trim());
+    }
+
+    // Draws a component centred horizontally, mirroring what
+    // drawCenteredTextWithShadow used to do (that convenience method is gone
+    // from GuiGraphicsExtractor; only graphics.text(...) is confirmed).
+    private void drawCentered(GuiGraphicsExtractor graphics, Component text, int centerX, int y, int color) {
+        int textWidth = font.width(text.getString());
+        graphics.text(font, text, centerX - textWidth / 2, y, color, true);
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        super.render(context, mouseX, mouseY, delta);
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(context, mouseX, mouseY, delta);
 
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2,
-                (height - WINDOW_HEIGHT) / 2 + 7, 0xFFFFFFFF);
+        drawCentered(context, title, width / 2, (height - WINDOW_HEIGHT) / 2 + 7, 0xFFFFFFFF);
 
-        Text radiusLabel = Text.translatable("label.nearplayer.radius");
-        Text alertRadiusLabel = Text.translatable("label.nearplayer.alert_radius");
-        Text excludedLabel = Text.translatable("label.nearplayer.excluded");
+        Component radiusLabel = Component.translatable("label.nearplayer.radius");
+        Component alertRadiusLabel = Component.translatable("label.nearplayer.alert_radius");
+        Component excludedLabel = Component.translatable("label.nearplayer.excluded");
 
-        context.drawTextWithShadow(textRenderer, radiusLabel, labelX, fieldsY + 16, 0xFFFFFFFF);
-        context.drawTextWithShadow(textRenderer, alertRadiusLabel, labelX, fieldsY + 44, 0xFFFFFFFF);
-        context.drawTextWithShadow(textRenderer, excludedLabel, labelX, fieldsY + 72, 0xFFFFFFFF);
+        context.text(font, radiusLabel, labelX, fieldsY + 16, 0xFFFFFFFF, true);
+        context.text(font, alertRadiusLabel, labelX, fieldsY + 44, 0xFFFFFFFF, true);
+        context.text(font, excludedLabel, labelX, fieldsY + 72, 0xFFFFFFFF, true);
 
-        Text cooldown = Text.translatable("text.nearplayer.cooldown").formatted(Formatting.GRAY);
-        context.drawCenteredTextWithShadow(textRenderer, cooldown, width / 2, bottomHintY, 0xFFAAAAAA);
-        Text hint = Text.translatable("text.nearplayer.controls").formatted(Formatting.GRAY);
-        context.drawCenteredTextWithShadow(textRenderer, hint, width / 2, bottomHintY + 12, 0xFFAAAAAA);
+        Component cooldown = Component.translatable("text.nearplayer.cooldown").withStyle(ChatFormatting.GRAY);
+        drawCentered(context, cooldown, width / 2, bottomHintY, 0xFFAAAAAA);
+        Component hint = Component.translatable("text.nearplayer.controls").withStyle(ChatFormatting.GRAY);
+        drawCentered(context, hint, width / 2, bottomHintY + 12, 0xFFAAAAAA);
     }
 
-    @Override public boolean shouldPause() { return false; }
-    @Override public void close() { client.setScreen(parent); }
+    // Confirmed from Screen.java: shouldPause() doesn't exist; isPauseScreen()
+    // is the real method (default true - we want false so the game doesn't pause).
+    @Override public boolean isPauseScreen() { return false; }
+
+    // Confirmed from Screen.java: close() doesn't exist; onClose() is the real
+    // hook (default implementation: this.minecraft.gui.setScreen(null)).
+    @Override public void onClose() { minecraft.gui.setScreen(parent); }
 }

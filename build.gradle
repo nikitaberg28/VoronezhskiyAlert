@@ -1,5 +1,6 @@
 plugins {
-	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+	// Renamed from "fabric-loom" as part of the 26.1 porting steps.
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
 	id 'maven-publish'
 }
 
@@ -21,12 +22,27 @@ repositories {
 dependencies {
 	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	// No "mappings" dependency anymore: Minecraft 26.1+ ships unobfuscated,
+	// and Loom uses Mojang's official mappings by default. Yarn is gone.
+	//
+	// CONFIRMED: modImplementation does NOT exist as a configuration under the
+	// "net.fabricmc.fabric-loom" (non-remap) plugin used here for unobfuscated
+	// 26.x Minecraft - Gradle itself errored with "Could not find method
+	// modImplementation()" when this was tried. So plain implementation below
+	// is correct for this plugin variant; the mod* configurations are specific
+	// to "net.fabricmc.fabric-loom-remap" (the obfuscated/pre-26.1 variant),
+	// not to this project. The HudElementRegistry resolution failure has some
+	// other cause - see PORTING_NOTES.md.
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
-	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-	
+	// CONFIRMED via fabric-api's own POM: it depends on fabric-rendering-v1
+	// (and all its other sub-modules) at "compile" scope transitively, so no
+	// separate explicit dependency on fabric-rendering-v1 is needed here - the
+	// actual HudElementRegistry resolution failure was a missing ".hud" in the
+	// import statement, not a dependency/classpath problem at all.
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
 }
 
 processResources {
@@ -38,30 +54,28 @@ processResources {
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 21
+	it.options.release = 25
 }
 
 java {
-	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-	// if it is present.
+	// Loom will automatically attach sourcesJar to the "build" task if it is present.
 	// If you remove this line, sources will not be generated.
 	withSourcesJar()
 
-	sourceCompatibility = JavaVersion.VERSION_21
-	targetCompatibility = JavaVersion.VERSION_21
+	// Gradle 9 removed the project-level sourceCompatibility/targetCompatibility
+	// properties; they now have to live inside this java {} extension block.
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
 }
 
 jar {
 	from("LICENSE") {
 		rename { "${it}_${project.archives_base_name}"}
 	}
-	archiveFileName = "${project.archives_base_name}-${project.mod_version}.jar"
-}
-
-afterEvaluate {
-	remapJar {
-		archiveFileName = "${project.archives_base_name}-fabric-${project.minecraft_version}-${project.mod_version}.jar"
-	}
+	// On unobfuscated Minecraft (26.1+) there is no separate remap step: the
+	// "jar" task itself produces the final, directly-usable mod jar, so it's
+	// given the same descriptive filename the old remapJar output used to have.
+	archiveFileName = "${project.archives_base_name}-fabric-${project.minecraft_version}-${project.mod_version}.jar"
 }
 
 // configure the maven publication
