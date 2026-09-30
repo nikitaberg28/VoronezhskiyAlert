@@ -21,7 +21,6 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.resources.Identifier;
-import org.lwjgl.glfw.GLFW;
 
 public class NearplayerClient implements ClientModInitializer {
     // Key binding categories became a structured record type (KeyMapping.Category)
@@ -47,10 +46,13 @@ public class NearplayerClient implements ClientModInitializer {
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
                 Identifier.fromNamespaceAndPath("nearplayer", "hud"), hudInstance::render);
 
+        // 26.3: GLFW is gone (LWJGL now ships SDL). InputConstants.Type.KEYSYM was
+        // renamed to KEYBOARD and key codes are SDL scancodes, exposed as
+        // InputConstants.KEY_*. org.lwjgl.glfw.GLFW is no longer on the classpath.
         openSettingsKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.nearplayer.opensettings", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_H, CATEGORY));
+                "key.nearplayer.opensettings", InputConstants.Type.KEYBOARD, InputConstants.KEY_H, CATEGORY));
         placeFlagKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.nearplayer.place_flag", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_J, CATEGORY));
+                "key.nearplayer.place_flag", InputConstants.Type.KEYBOARD, InputConstants.KEY_J, CATEGORY));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             hudInstance.tick();
