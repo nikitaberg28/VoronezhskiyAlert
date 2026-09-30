@@ -197,17 +197,19 @@ public class NearPlayerHud {
         // each team's own configured color (PlayerTeam.getColor(), the real
         // color the server assigned that team - not text formatting pulled
         // out of a display name, which may carry none at all).
-        // TODO-VERIFY: PlayerTeam.getColor() itself wasn't 100% directly
-        // confirmed in decompiled/mapping sources checked so far (a private
-        // "color" field on PlayerTeam and a public getColor() on the related
-        // network packet's Parameters class were both confirmed, strongly
-        // suggesting PlayerTeam has the same accessor, but double-check in
-        // your IDE if this line fails to compile).
+        // CONFIRMED from compiler error: PlayerTeam.getColor() returns
+        // Optional<TeamColor> in 26.x, NOT ChatFormatting - TeamColor is a
+        // new type introduced at some point that wasn't seen in any
+        // decompiled source so far. We don't need to know TeamColor's own
+        // members though: Optional's equals() delegates to the wrapped
+        // value's equals(), so comparing the two Optionals directly correctly
+        // tells us "same color" vs "different color" (or "neither has a
+        // color set") without knowing anything else about TeamColor.
         if (playerTeam != null || ownTeam != null) {
-            ChatFormatting playerTeamColor = playerTeam != null ? playerTeam.getColor() : null;
-            ChatFormatting ownTeamColor = ownTeam != null ? ownTeam.getColor() : null;
-            if (playerTeamColor != null && ownTeamColor != null) {
-                return playerTeamColor != ownTeamColor;
+            java.util.Optional<?> playerTeamColor = playerTeam != null ? playerTeam.getColor() : java.util.Optional.empty();
+            java.util.Optional<?> ownTeamColor = ownTeam != null ? ownTeam.getColor() : java.util.Optional.empty();
+            if (playerTeamColor.isPresent() && ownTeamColor.isPresent()) {
+                return !playerTeamColor.equals(ownTeamColor);
             }
         }
 
